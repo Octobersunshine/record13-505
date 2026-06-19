@@ -10,6 +10,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             available_quota INTEGER NOT NULL,
             start_time TEXT NOT NULL,
             end_time TEXT NOT NULL,
+            is_hot INTEGER NOT NULL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         )
@@ -17,6 +18,17 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    let is_hot_exists: Option<(String,)> = sqlx::query_as(
+        "SELECT name FROM pragma_table_info('sessions') WHERE name = 'is_hot'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if is_hot_exists.is_none() {
+        sqlx::query("ALTER TABLE sessions ADD COLUMN is_hot INTEGER NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await?;
+    }
 
     sqlx::query(
         r#"
@@ -35,6 +47,19 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS user_booking_stats (
+            user_id TEXT PRIMARY KEY,
+            no_show_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -43,3 +68,4 @@ pub async fn create_pool() -> Result<SqlitePool, sqlx::Error> {
     init_db(&pool).await?;
     Ok(pool)
 }
+

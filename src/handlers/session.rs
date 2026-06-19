@@ -13,11 +13,12 @@ pub async fn create_session(
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<Value>), AppError> {
     let id = Uuid::new_v4().to_string();
+    let is_hot = if req.is_hot { 1 } else { 0 };
 
     sqlx::query_as::<_, Session>(
         r#"
-        INSERT INTO sessions (id, title, total_quota, available_quota, start_time, end_time)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO sessions (id, title, total_quota, available_quota, start_time, end_time, is_hot)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING *
         "#,
     )
@@ -27,6 +28,7 @@ pub async fn create_session(
     .bind(req.total_quota)
     .bind(&req.start_time)
     .bind(&req.end_time)
+    .bind(is_hot)
     .fetch_one(&state.pool)
     .await?;
 

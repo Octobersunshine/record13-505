@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::models::{
-    Booking, CreateBookingRequest, Session, BOOKING_STATUS_CANCELLED,
-    BOOKING_STATUS_CONFIRMED,
+    Booking, CreateBookingRequest, Session, UserBookingStats, BOOKING_STATUS_CANCELLED,
+    BOOKING_STATUS_CONFIRMED, BOOKING_STATUS_NO_SHOW, MAX_NO_SHOW_FOR_HOT_SESSION,
 };
 use crate::state::AppState;
 
@@ -25,6 +25,23 @@ pub async fn create_booking(
 
     if session.available_quota <= 0 {
         return Err(AppError::QuotaExhausted);
+    }
+
+    if session.is_hot {
+        let stats = sqlx::query_as::<_, UserBookingStats>(
+            "SELECT * FROM user_booking_stats WHERE user_id = ?",
+        )
+        .bind(&req.user_id)
+        .fetch_optional(&state.pool)
+        .await?;
+
+        let no_show_count = stats.map(|s| s.no_show_count).unwrap_or(0);
+        if no_show_count >= MAX_NO_SHOW_FOR_HOT_SESSION {
+            return Err(AppError::HotSessionBlocked {
+                count: no_show_count,
+                limit: MAX_NO_SHOW_FOR_HOT_SESSION,
+            });
+        }
     }
 
     let existing = sqlx::query_as::<_, Booking>(
@@ -109,6 +126,9 @@ pub async fn cancel_booking(
     if booking.status == BOOKING_STATUS_CANCELLED {
         return Err(AppError::BookingAlreadyCancelled);
     }
+    if booking.status == BOOKING_STATUS_NO_SHOW {
+        return Err(AppError::BookingAlreadyCancelled);
+    }
 
     let mut tx = state.pool.begin().await?;
 
@@ -157,6 +177,84 @@ pub async fn cancel_booking(
             "id": booking.id,
             "session_id": booking.session_id,
             "status": BOOKING_STATUS_CANCELLED
+        }
+    })))
+}
+
+pub async fn mark_no_show(
+    State(state): State<AppState>,
+    Path(booking_id): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    let booking = sqlx::query_as::<_, Booking>(
+        "SELECT * FROM bookings WHERE id = ?",
+    )
+    .bind(&booking_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::BookingNotFound(booking_id.clone()))?;
+
+    if booking.status == BOOKING_STATUS_NO_SHOW {
+        return Err(AppError::BookingAlreadyNoShow);
+    }
+
+    let mut tx = state.pool.begin().await?;
+
+    let booking_updated = sqlx::query(
+        r#"
+        UPDATE bookings
+        SET status = ?,
+            updated_at = datetime('now')
+        WHERE id = ? AND status != ?
+        "#,
+    )
+    .bind(BOOKING_STATUS_NO_SHOW)
+    .bind(&booking_id)
+    .bind(BOOKING_STATUS_NO_SHOW)
+    .execute(&mut *tx)
+    .await?;
+
+    if booking_updated.rows_affected() == 0 {
+        tx.rollback().await?;
+        return Err(AppError::BookingAlreadyNoShow);
+    }
+
+    let stats_affected = sqlx::query(
+        r#"
+        INSERT INTO user_booking_stats (user_id, no_show_count)
+        VALUES (?, 1)
+        ON CONFLICT(user_id) DO UPDATE SET
+            no_show_count = no_show_count + 1,
+            updated_at = datetime('now')
+        "#,
+    )
+    .bind(&booking.user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if stats_affected.rows_affected() == 0 {
+        tx.rollback().await?;
+        return Err(AppError::Internal("爽约次数统计更新失败".into()));
+    }
+
+    tx.commit().await?;
+
+    let updated_stats = sqlx::query_as::<_, UserBookingStats>(
+        "SELECT * FROM user_booking_stats WHERE user_id = ?",
+    )
+    .bind(&booking.user_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Json(json!({
+        "code": 200,
+        "message": "已标记为爽约，爽约次数已累计",
+        "data": {
+            "id": booking.id,
+            "session_id": booking.session_id,
+            "user_id": booking.user_id,
+            "status": BOOKING_STATUS_NO_SHOW,
+            "no_show_count": updated_stats.no_show_count,
+            "blocked_hot_sessions": updated_stats.no_show_count >= MAX_NO_SHOW_FOR_HOT_SESSION,
         }
     })))
 }

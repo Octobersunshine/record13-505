@@ -22,6 +22,12 @@ pub enum AppError {
     #[error("预约已取消，无法重复取消")]
     BookingAlreadyCancelled,
 
+    #[error("用户爽约次数过多，无法预约热门场次（当前爽约次数: {count}，上限: {limit}）")]
+    HotSessionBlocked { count: i64, limit: i64 },
+
+    #[error("预约已是爽约状态，无法重复标记")]
+    BookingAlreadyNoShow,
+
     #[error("数据库错误: {0}")]
     Database(#[from] sqlx::Error),
 
@@ -37,6 +43,8 @@ impl IntoResponse for AppError {
             AppError::QuotaExhausted => (StatusCode::CONFLICT, self.to_string()),
             AppError::DuplicateBooking { .. } => (StatusCode::CONFLICT, self.to_string()),
             AppError::BookingAlreadyCancelled => (StatusCode::CONFLICT, self.to_string()),
+            AppError::BookingAlreadyNoShow => (StatusCode::CONFLICT, self.to_string()),
+            AppError::HotSessionBlocked { .. } => (StatusCode::FORBIDDEN, self.to_string()),
             AppError::SessionEnded => (StatusCode::BAD_REQUEST, self.to_string()),
             AppError::Database(e) => {
                 tracing::error!("数据库错误: {:?}", e);

@@ -4,7 +4,7 @@ mod handlers;
 mod models;
 mod state;
 
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 use tracing_subscriber::EnvFilter;
 
@@ -29,6 +29,10 @@ async fn main() {
         .route("/sessions/{id}", get(handlers::session::get_session))
         .route("/bookings", post(handlers::booking::create_booking))
         .route("/bookings/{id}", delete(handlers::booking::cancel_booking))
+        .route(
+            "/bookings/{id}/no-show",
+            put(handlers::booking::mark_no_show),
+        )
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
