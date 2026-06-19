@@ -1,6 +1,4 @@
-use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Session {
@@ -37,3 +35,7 @@ pub struct CreateBookingRequest {
     pub session_id: String,
     pub user_id: String,
 }
+
+pub const BOOKING_STATUS_CONFIRMED: &str = "confirmed";
+pub const BOOKING_STATUS_CANCELLED: &str = "cancelled";
+

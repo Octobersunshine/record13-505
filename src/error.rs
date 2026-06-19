@@ -16,6 +16,12 @@ pub enum AppError {
     #[error("场次已结束，无法预约")]
     SessionEnded,
 
+    #[error("预约不存在: {0}")]
+    BookingNotFound(String),
+
+    #[error("预约已取消，无法重复取消")]
+    BookingAlreadyCancelled,
+
     #[error("数据库错误: {0}")]
     Database(#[from] sqlx::Error),
 
@@ -27,8 +33,10 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
             AppError::SessionNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
+            AppError::BookingNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
             AppError::QuotaExhausted => (StatusCode::CONFLICT, self.to_string()),
             AppError::DuplicateBooking { .. } => (StatusCode::CONFLICT, self.to_string()),
+            AppError::BookingAlreadyCancelled => (StatusCode::CONFLICT, self.to_string()),
             AppError::SessionEnded => (StatusCode::BAD_REQUEST, self.to_string()),
             AppError::Database(e) => {
                 tracing::error!("数据库错误: {:?}", e);
